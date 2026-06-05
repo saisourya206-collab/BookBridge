@@ -1,12 +1,11 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Phone, Mail, MapPin, CheckCircle } from 'lucide-react';
+import { Phone, MapPin, CheckCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -16,6 +15,14 @@ interface ContactExchangeProps {
   onClose: () => void;
   isDonor: boolean;
   onExchangeComplete: () => void;
+}
+
+interface ExchangeStatus {
+  donor_phone?: string | null;
+  donor_address?: string | null;
+  requester_phone?: string | null;
+  requester_address?: string | null;
+  status?: string | null;
 }
 
 export const ContactExchange: React.FC<ContactExchangeProps> = ({
@@ -28,15 +35,29 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
-  const [exchangeStatus, setExchangeStatus] = useState<any>(null);
+  const [exchangeStatus, setExchangeStatus] = useState<ExchangeStatus | null>(null);
   const { toast } = useToast();
+
+  const fetchExchangeStatus = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from('contact_exchanges')
+        .select('*')
+        .eq('request_id', requestId)
+        .single();
+
+      setExchangeStatus(data);
+    } catch (error) {
+      console.error('Error fetching exchange status:', error);
+    }
+  }, [requestId]);
 
   useEffect(() => {
     if (isOpen) {
       fetchUserProfile();
       fetchExchangeStatus();
     }
-  }, [isOpen, requestId]);
+  }, [isOpen, requestId, fetchExchangeStatus]);
 
   const fetchUserProfile = async () => {
     try {
@@ -50,25 +71,11 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
         .single();
 
       if (data) {
-        setPhone(data.phone || '');
-        setAddress(data.address || '');
+        setPhone((data as { phone?: string; address?: string }).phone || '');
+        setAddress((data as { phone?: string; address?: string }).address || '');
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
-    }
-  };
-
-  const fetchExchangeStatus = async () => {
-    try {
-      const { data } = await supabase
-        .from('contact_exchanges')
-        .select('*')
-        .eq('request_id', requestId)
-        .single();
-
-      setExchangeStatus(data);
-    } catch (error) {
-      console.error('Error fetching exchange status:', error);
     }
   };
 
@@ -87,14 +94,12 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Update user profile
       await supabase
         .from('profiles')
         .update({ phone, address })
         .eq('id', user.id);
 
-      // Create or update contact exchange
-      const updateData = isDonor 
+      const updateData = isDonor
         ? { donor_phone: phone, donor_address: address }
         : { requester_phone: phone, requester_address: address };
 
@@ -118,7 +123,6 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
           });
       }
 
-      // Get request details and user names separately
       const { data: request } = await supabase
         .from('book_requests')
         .select('*, books(title)')
@@ -127,33 +131,31 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
 
       if (request) {
         const otherUserId = isDonor ? request.requester_id : request.donor_id;
-        
-        // Get the current user's name
+
         const { data: currentUserProfile } = await supabase
           .from('profiles')
           .select('full_name')
           .eq('id', user.id)
           .single();
 
-        const currentUserName = currentUserProfile?.full_name || 'Someone';
-        
+        const currentUserName = (currentUserProfile as { full_name?: string } | null)?.full_name || 'Someone';
+
         await supabase.rpc('create_book_notification', {
           user_id: otherUserId,
           notification_type: 'contact_shared',
           notification_title: 'Contact Details Shared',
-          notification_message: `${currentUserName} has shared their contact details for "${request.books?.title}".`
+          notification_message: `${currentUserName} has shared their contact details for "${(request.books as { title?: string } | null)?.title}".`
         });
       }
 
-      // Check if both parties have shared details
       const { data: exchange } = await supabase
         .from('contact_exchanges')
         .select('*')
         .eq('request_id', requestId)
         .single();
 
-      if (exchange && exchange.donor_phone && exchange.requester_phone) {
-        // Both parties have shared details, mark as complete
+      const exchangeData = exchange as ExchangeStatus | null;
+      if (exchangeData && exchangeData.donor_phone && exchangeData.requester_phone) {
         await supabase
           .from('contact_exchanges')
           .update({ status: 'completed' })
@@ -168,22 +170,23 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
       });
 
       onClose();
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
     setLoading(false);
   };
 
-  const hasSharedDetails = isDonor 
-    ? exchangeStatus?.donor_phone 
+  const hasSharedDetails = isDonor
+    ? exchangeStatus?.donor_phone
     : exchangeStatus?.requester_phone;
 
-  const otherPartyShared = isDonor 
-    ? exchangeStatus?.requester_phone 
+  const otherPartyShared = isDonor
+    ? exchangeStatus?.requester_phone
     : exchangeStatus?.donor_phone;
 
   return (
@@ -192,14 +195,14 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
         <DialogHeader>
           <DialogTitle>Share Contact Details</DialogTitle>
         </DialogHeader>
-        
+
         {hasSharedDetails ? (
           <div className="space-y-4">
             <div className="flex items-center text-green-600">
               <CheckCircle className="h-5 w-5 mr-2" />
               <span>You have already shared your contact details</span>
             </div>
-            
+
             {otherPartyShared ? (
               <Card>
                 <CardHeader>
@@ -208,11 +211,11 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
                 <CardContent className="space-y-2">
                   <div className="flex items-center">
                     <Phone className="h-4 w-4 mr-2" />
-                    <span className="text-sm">{isDonor ? exchangeStatus.requester_phone : exchangeStatus.donor_phone}</span>
+                    <span className="text-sm">{isDonor ? exchangeStatus?.requester_phone : exchangeStatus?.donor_phone}</span>
                   </div>
                   <div className="flex items-center">
                     <MapPin className="h-4 w-4 mr-2" />
-                    <span className="text-sm">{isDonor ? exchangeStatus.requester_address : exchangeStatus.donor_address}</span>
+                    <span className="text-sm">{isDonor ? exchangeStatus?.requester_address : exchangeStatus?.donor_address}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -227,7 +230,7 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
             <p className="text-sm text-muted-foreground">
               Please share your contact details to coordinate the book exchange.
             </p>
-            
+
             <div className="space-y-4">
               <div>
                 <Label htmlFor="phone">Phone Number</Label>
@@ -239,7 +242,7 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
                   placeholder="Your phone number"
                 />
               </div>
-              
+
               <div>
                 <Label htmlFor="address">Address</Label>
                 <Textarea
@@ -251,7 +254,7 @@ export const ContactExchange: React.FC<ContactExchangeProps> = ({
                 />
               </div>
             </div>
-            
+
             <div className="flex justify-end space-x-2">
               <Button variant="outline" onClick={onClose}>
                 Cancel

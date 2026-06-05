@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,11 +23,7 @@ export const MyDonations = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchDonatedBooks();
-  }, []);
-
-  const fetchDonatedBooks = async () => {
+  const fetchDonatedBooks = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -41,16 +36,19 @@ export const MyDonations = () => {
 
       if (error) throw error;
 
-      setDonatedBooks(data || []);
+      setDonatedBooks((data as DonatedBook[]) || []);
     } catch (error) {
       console.error('Error fetching donated books:', error);
     }
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchDonatedBooks();
+  }, [fetchDonatedBooks]);
 
   const handleDeleteBook = async (bookId: string) => {
     try {
-      // Check if there are any pending requests for this book
       const { data: requests } = await supabase
         .from('book_requests')
         .select('id')
@@ -79,10 +77,11 @@ export const MyDonations = () => {
         title: "Book removed",
         description: "The book has been successfully removed from your donations.",
       });
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -173,7 +172,7 @@ export const MyDonations = () => {
                   </div>
                   <span>Condition: {book.condition}</span>
                 </div>
-                
+
                 <div className="flex gap-2">
                   <Button
                     variant="outline"

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -42,10 +41,11 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
         description: "Please check your email to verify your account.",
       });
       onAuthSuccess();
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -67,10 +67,11 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
         description: "You have successfully signed in.",
       });
       onAuthSuccess();
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -83,13 +84,13 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
         <DialogHeader>
           <DialogTitle>Welcome to BookBridge</DialogTitle>
         </DialogHeader>
-        
+
         <Tabs defaultValue="signin" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="signin">Sign In</TabsTrigger>
             <TabsTrigger value="signup">Sign Up</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="signin" className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="signin-email">Email</Label>
@@ -105,7 +106,7 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="signin-password">Password</Label>
               <div className="relative">
@@ -120,12 +121,12 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
                 />
               </div>
             </div>
-            
+
             <Button onClick={handleSignIn} disabled={loading} className="w-full">
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </TabsContent>
-          
+
           <TabsContent value="signup" className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="signup-name">Full Name</Label>
@@ -141,7 +142,7 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="signup-email">Email</Label>
               <div className="relative">
@@ -156,7 +157,7 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="signup-password">Password</Label>
               <div className="relative">
@@ -171,7 +172,7 @@ export const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose, onAuthS
                 />
               </div>
             </div>
-            
+
             <Button onClick={handleSignUp} disabled={loading} className="w-full">
               {loading ? 'Creating account...' : 'Sign Up'}
             </Button>

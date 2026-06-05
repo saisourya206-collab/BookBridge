@@ -1,13 +1,13 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BookOpen, MessageSquare, CheckCircle, XCircle, Trash2, User, Phone, MapPin, Mail } from 'lucide-react';
+import { BookOpen, MessageSquare, CheckCircle, XCircle, Trash2, User, Phone } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { ContactExchange } from '@/components/ContactExchange';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface BookRequest {
   id: string;
@@ -34,34 +34,22 @@ interface BookRequest {
   };
 }
 
+interface Profile {
+  id: string;
+  full_name: string;
+  username: string;
+}
+
 export const MyRequests = () => {
   const [sentRequests, setSentRequests] = useState<BookRequest[]>([]);
   const [receivedRequests, setReceivedRequests] = useState<BookRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [contactExchangeRequestId, setContactExchangeRequestId] = useState<string | null>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchUserAndRequests();
-  }, []);
-
-  const fetchUserAndRequests = async () => {
+  const fetchRequests = useCallback(async (userId: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-      if (user) {
-        await fetchRequests(user.id);
-      }
-    } catch (error) {
-      console.error('Error fetching user:', error);
-    }
-    setLoading(false);
-  };
-
-  const fetchRequests = async (userId: string) => {
-    try {
-      // Fetch sent requests (requests I made)
       const { data: sentData, error: sentError } = await supabase
         .from('book_requests')
         .select(`
@@ -73,7 +61,6 @@ export const MyRequests = () => {
 
       if (sentError) throw sentError;
 
-      // Fetch received requests (requests for my books)
       const { data: receivedData, error: receivedError } = await supabase
         .from('book_requests')
         .select(`
@@ -85,7 +72,6 @@ export const MyRequests = () => {
 
       if (receivedError) throw receivedError;
 
-      // Fetch requester profiles for received requests
       if (receivedData && receivedData.length > 0) {
         const requesterIds = receivedData.map(req => req.requester_id);
         const { data: profiles } = await supabase
@@ -95,14 +81,13 @@ export const MyRequests = () => {
 
         const requestsWithProfiles = receivedData.map(req => ({
           ...req,
-          requester_profile: profiles?.find(p => p.id === req.requester_id)
+          requester_profile: (profiles as Profile[] | null)?.find(p => p.id === req.requester_id)
         }));
         setReceivedRequests(requestsWithProfiles);
       } else {
         setReceivedRequests([]);
       }
 
-      // Fetch donor profiles for sent requests
       if (sentData && sentData.length > 0) {
         const donorIds = sentData.map(req => req.donor_id);
         const { data: profiles } = await supabase
@@ -112,13 +97,12 @@ export const MyRequests = () => {
 
         const requestsWithProfiles = sentData.map(req => ({
           ...req,
-          donor_profile: profiles?.find(p => p.id === req.donor_id)
+          donor_profile: (profiles as Profile[] | null)?.find(p => p.id === req.donor_id)
         }));
         setSentRequests(requestsWithProfiles);
       } else {
         setSentRequests([]);
       }
-
     } catch (error) {
       console.error('Error fetching requests:', error);
       toast({
@@ -127,49 +111,50 @@ export const MyRequests = () => {
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
+
+  const fetchUserAndRequests = useCallback(async () => {
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      setUser(currentUser);
+      if (currentUser) {
+        await fetchRequests(currentUser.id);
+      }
+    } catch (error) {
+      console.error('Error fetching user:', error);
+    }
+    setLoading(false);
+  }, [fetchRequests]);
+
+  useEffect(() => {
+    fetchUserAndRequests();
+  }, [fetchUserAndRequests]);
 
   const handleAcceptRequest = async (requestId: string, bookTitle: string, requesterId: string) => {
     try {
-      console.log('Accepting request:', requestId);
-      
-      // Update request status to accepted
       const { error: updateError } = await supabase
         .from('book_requests')
-        .update({ 
+        .update({
           status: 'accepted',
           updated_at: new Date().toISOString()
         })
         .eq('id', requestId);
 
-      if (updateError) {
-        console.error('Error updating request status:', updateError);
-        throw updateError;
-      }
+      if (updateError) throw updateError;
 
-      console.log('Request status updated successfully');
-
-      // Create notification for requester
       try {
-        const { error: notificationError } = await supabase.rpc('create_book_notification', {
+        await supabase.rpc('create_book_notification', {
           user_id: requesterId,
           notification_type: 'request_accepted',
           notification_title: 'Book Request Accepted',
           notification_message: `Great news! Your request for "${bookTitle}" has been accepted. You can now exchange contact information with the donor.`
         });
-
-        if (notificationError) {
-          console.error('Notification error:', notificationError);
-        } else {
-          console.log('Notification sent successfully');
-        }
       } catch (notificationError) {
         console.error('Failed to send notification:', notificationError);
       }
 
-      // Update local state
-      setReceivedRequests(prev => 
-        prev.map(req => 
+      setReceivedRequests(prev =>
+        prev.map(req =>
           req.id === requestId ? { ...req, status: 'accepted' } : req
         )
       );
@@ -179,13 +164,12 @@ export const MyRequests = () => {
         description: "The book request has been accepted. You can now exchange contact information.",
       });
 
-      // Open contact exchange modal
       setContactExchangeRequestId(requestId);
-    } catch (error: any) {
-      console.error('Error in handleAcceptRequest:', error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to accept request. Please try again.';
       toast({
         title: "Error",
-        description: error.message || "Failed to accept request. Please try again.",
+        description: message,
         variant: "destructive",
       });
     }
@@ -195,7 +179,7 @@ export const MyRequests = () => {
     try {
       const { error } = await supabase
         .from('book_requests')
-        .update({ 
+        .update({
           status: 'rejected',
           updated_at: new Date().toISOString()
         })
@@ -203,7 +187,6 @@ export const MyRequests = () => {
 
       if (error) throw error;
 
-      // Create notification for requester
       try {
         await supabase.rpc('create_book_notification', {
           user_id: requesterId,
@@ -215,8 +198,8 @@ export const MyRequests = () => {
         console.error('Notification error:', notificationError);
       }
 
-      setReceivedRequests(prev => 
-        prev.map(req => 
+      setReceivedRequests(prev =>
+        prev.map(req =>
           req.id === requestId ? { ...req, status: 'rejected' } : req
         )
       );
@@ -225,10 +208,11 @@ export const MyRequests = () => {
         title: "Request rejected",
         description: "The book request has been rejected.",
       });
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -236,9 +220,6 @@ export const MyRequests = () => {
 
   const handleDeleteRequest = async (requestId: string, isSent: boolean) => {
     try {
-      console.log('Attempting to delete request:', requestId);
-      
-      // First check if there are any contact exchanges for this request
       const { data: exchanges, error: exchangeError } = await supabase
         .from('contact_exchanges')
         .select('*')
@@ -248,7 +229,6 @@ export const MyRequests = () => {
         console.error('Error checking contact exchanges:', exchangeError);
       }
 
-      // Delete contact exchanges first if they exist
       if (exchanges && exchanges.length > 0) {
         const { error: deleteExchangeError } = await supabase
           .from('contact_exchanges')
@@ -256,7 +236,6 @@ export const MyRequests = () => {
           .eq('request_id', requestId);
 
         if (deleteExchangeError) {
-          console.error('Error deleting contact exchanges:', deleteExchangeError);
           toast({
             title: "Error",
             description: "Failed to delete related contact information.",
@@ -266,18 +245,13 @@ export const MyRequests = () => {
         }
       }
 
-      // Now delete the request
       const { error } = await supabase
         .from('book_requests')
         .delete()
         .eq('id', requestId);
 
-      if (error) {
-        console.error('Error deleting request:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      // Update local state immediately
       if (isSent) {
         setSentRequests(prev => prev.filter(req => req.id !== requestId));
       } else {
@@ -288,11 +262,11 @@ export const MyRequests = () => {
         title: "Request deleted",
         description: "The request has been successfully deleted.",
       });
-    } catch (error: any) {
-      console.error('Error in handleDeleteRequest:', error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete request.';
       toast({
         title: "Error",
-        description: error.message || "Failed to delete request.",
+        description: message,
         variant: "destructive",
       });
     }
@@ -300,7 +274,6 @@ export const MyRequests = () => {
 
   const handleContactExchangeComplete = async (requestId: string, bookId: string) => {
     try {
-      // Update book status to 'donated' to remove it from available books
       const { error: bookError } = await supabase
         .from('books')
         .update({ status: 'donated' })
@@ -308,7 +281,6 @@ export const MyRequests = () => {
 
       if (bookError) throw bookError;
 
-      // Update request status to 'completed'
       const { error: requestError } = await supabase
         .from('book_requests')
         .update({ status: 'completed' })
@@ -316,15 +288,14 @@ export const MyRequests = () => {
 
       if (requestError) throw requestError;
 
-      // Update local state
-      setReceivedRequests(prev => 
-        prev.map(req => 
+      setReceivedRequests(prev =>
+        prev.map(req =>
           req.id === requestId ? { ...req, status: 'completed' } : req
         )
       );
 
-      setSentRequests(prev => 
-        prev.map(req => 
+      setSentRequests(prev =>
+        prev.map(req =>
           req.id === requestId ? { ...req, status: 'completed' } : req
         )
       );
@@ -335,11 +306,11 @@ export const MyRequests = () => {
         title: "Contact information exchanged",
         description: "The book has been marked as donated and removed from available listings.",
       });
-    } catch (error: any) {
-      console.error('Error completing contact exchange:', error);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -386,7 +357,7 @@ export const MyRequests = () => {
       <Tabs defaultValue="sent" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="sent">
-            Requests I Sent 
+            Requests I Sent
             {sentRequests.length > 0 && ` (${sentRequests.length})`}
             {pendingSentCount > 0 && (
               <Badge variant="secondary" className="ml-2">
@@ -395,7 +366,7 @@ export const MyRequests = () => {
             )}
           </TabsTrigger>
           <TabsTrigger value="received">
-            Requests I Received 
+            Requests I Received
             {receivedRequests.length > 0 && ` (${receivedRequests.length})`}
             {pendingReceivedCount > 0 && (
               <Badge variant="destructive" className="ml-2">
@@ -404,7 +375,7 @@ export const MyRequests = () => {
             )}
           </TabsTrigger>
         </TabsList>
-        
+
         <TabsContent value="sent" className="space-y-4">
           {sentRequests.length === 0 ? (
             <div className="text-center py-12">
@@ -519,7 +490,7 @@ export const MyRequests = () => {
                     <p className="text-sm text-muted-foreground mb-3">
                       Requested on {new Date(request.created_at).toLocaleDateString()}
                     </p>
-                    
+
                     {request.status === 'pending' && (
                       <div className="flex gap-2">
                         <Button
@@ -539,7 +510,7 @@ export const MyRequests = () => {
                         </Button>
                       </div>
                     )}
-                    
+
                     {request.status === 'accepted' && (
                       <Button
                         onClick={() => setContactExchangeRequestId(request.id)}
@@ -557,7 +528,6 @@ export const MyRequests = () => {
         </TabsContent>
       </Tabs>
 
-      {/* Contact Exchange Modal */}
       {contactExchangeRequestId && (
         <ContactExchange
           requestId={contactExchangeRequestId}

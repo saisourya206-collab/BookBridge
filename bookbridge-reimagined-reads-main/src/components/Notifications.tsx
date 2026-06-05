@@ -1,9 +1,8 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Bell, Check, X, Eye, EyeOff } from 'lucide-react';
+import { Bell, Check, Eye } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -21,11 +20,7 @@ export const Notifications = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchNotifications();
-  }, []);
-
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -37,12 +32,16 @@ export const Notifications = () => {
         .order('createdat', { ascending: false });
 
       if (error) throw error;
-      setNotifications(data || []);
+      setNotifications((data as Notification[]) || []);
     } catch (error) {
       console.error('Error fetching notifications:', error);
     }
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
 
   const markAsRead = async (notificationId: string) => {
     try {
@@ -53,15 +52,16 @@ export const Notifications = () => {
 
       if (error) throw error;
 
-      setNotifications(prev => 
-        prev.map(notif => 
+      setNotifications(prev =>
+        prev.map(notif =>
           notif.id === notificationId ? { ...notif, read: true } : notif
         )
       );
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -80,7 +80,7 @@ export const Notifications = () => {
 
       if (error) throw error;
 
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.map(notif => ({ ...notif, read: true }))
       );
 
@@ -88,10 +88,11 @@ export const Notifications = () => {
         title: "Success",
         description: "All notifications marked as read.",
       });
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }

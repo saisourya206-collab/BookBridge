@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,9 +7,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { BookOpen, User, Search, Filter, MessageSquare } from 'lucide-react';
+import { BookOpen, User, Search, MessageSquare } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
+
+interface Profile {
+  id: string;
+  full_name: string;
+}
 
 interface Book {
   id: string;
@@ -31,34 +37,14 @@ export const AvailableBooks = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [conditionFilter, setConditionFilter] = useState('All');
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [requestMessage, setRequestMessage] = useState('');
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchUserAndBooks();
-  }, []);
-
-  useEffect(() => {
-    filterBooks();
-  }, [books, searchTerm, categoryFilter, conditionFilter]);
-
-  const fetchUserAndBooks = async () => {
+  const fetchBooks = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-      await fetchBooks();
-    } catch (error) {
-      console.error('Error fetching user:', error);
-    }
-    setLoading(false);
-  };
-
-  const fetchBooks = async () => {
-    try {
-      // First fetch books that are available and not free to read
       const { data: booksData, error: booksError } = await supabase
         .from('books')
         .select('*')
@@ -68,10 +54,9 @@ export const AvailableBooks = () => {
 
       if (booksError) throw booksError;
 
-      // Then fetch profiles for the donors
-      const donorIds = [...new Set(booksData?.map(book => book.donorid).filter(Boolean))];
-      
-      let profilesData: any[] = [];
+      const donorIds = [...new Set(booksData?.map(book => book.donorid).filter(Boolean))] as string[];
+
+      let profilesData: Profile[] = [];
       if (donorIds.length > 0) {
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
@@ -81,11 +66,10 @@ export const AvailableBooks = () => {
         if (profilesError) {
           console.error('Error fetching profiles:', profilesError);
         } else {
-          profilesData = profiles || [];
+          profilesData = (profiles as Profile[]) || [];
         }
       }
 
-      // Combine books with profile data
       const booksWithProfiles = booksData?.map(book => ({
         ...book,
         profiles: profilesData.find(profile => profile.id === book.donorid) || null
@@ -100,9 +84,20 @@ export const AvailableBooks = () => {
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
 
-  const filterBooks = () => {
+  const fetchUserAndBooks = useCallback(async () => {
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      setUser(currentUser);
+      await fetchBooks();
+    } catch (error) {
+      console.error('Error fetching user:', error);
+    }
+    setLoading(false);
+  }, [fetchBooks]);
+
+  const filterBooks = useCallback(() => {
     let filtered = books;
 
     if (searchTerm) {
@@ -121,7 +116,15 @@ export const AvailableBooks = () => {
     }
 
     setFilteredBooks(filtered);
-  };
+  }, [books, searchTerm, categoryFilter, conditionFilter]);
+
+  useEffect(() => {
+    fetchUserAndBooks();
+  }, [fetchUserAndBooks]);
+
+  useEffect(() => {
+    filterBooks();
+  }, [filterBooks]);
 
   const handleRequestBook = (book: Book) => {
     if (!user) {
@@ -147,7 +150,7 @@ export const AvailableBooks = () => {
   };
 
   const submitBookRequest = async () => {
-    if (!selectedBook) return;
+    if (!selectedBook || !user) return;
 
     try {
       const { error } = await supabase
@@ -162,7 +165,6 @@ export const AvailableBooks = () => {
 
       if (error) throw error;
 
-      // Create notification for donor
       try {
         await supabase.rpc('create_book_notification', {
           user_id: selectedBook.donorid,
@@ -182,10 +184,11 @@ export const AvailableBooks = () => {
       setRequestDialogOpen(false);
       setRequestMessage('');
       setSelectedBook(null);
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send request.';
       toast({
         title: "Error",
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -284,7 +287,7 @@ export const AvailableBooks = () => {
                 <div className="text-xs text-muted-foreground">
                   <span>Donated by: {book.profiles?.full_name || 'Anonymous'}</span>
                 </div>
-                <Button 
+                <Button
                   size="sm"
                   onClick={() => handleRequestBook(book)}
                 >
@@ -302,7 +305,7 @@ export const AvailableBooks = () => {
           <BookOpen className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
           <h3 className="text-xl font-semibold mb-2">No books found</h3>
           <p className="text-muted-foreground">
-            {books.length === 0 
+            {books.length === 0
               ? "No books are currently available for request."
               : "Try adjusting your search criteria to find more books."
             }
